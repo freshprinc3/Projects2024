@@ -1,0 +1,171 @@
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import re
+import numpy as np
+from scipy.stats import pearsonr  # if you dont have this then pearson correlation code wont work
+
+
+def get_html_content(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.text
+    else:
+        raise Exception(f"Failed to retrieve HTML content. Status code: {response.status_code}")
+
+def extract_text(soup, selector):
+    element = soup.select_one(selector)
+    return element.text.strip() if element else 'Data Not Found'
+
+def extract_country_name(soup):
+    return extract_text(soup, 'h1#firstHeading')
+
+def extract_capital_name(soup):
+    capital_row = find_value_in_table(soup, 'Capital')
+    if capital_row:
+        capital_text1 = capital_row.find_next('td').text.strip().split(' ')[0]
+        capital_text = re.findall(r'[A-Za-z]+|\d+', str(capital_text1))
+        capital_text = [w for w in capital_text if w]
+        return capital_text[0]
+    else:
+        target = soup.findAll(
+        "div", class_="ib-country-largest")[0]#.get_text(strip=True)
+        capital_text1 = target.find_next('td').text.strip().split(' ')[0]
+        capital_text = re.findall(r'[A-Za-z]+|\d+', str(capital_text1))
+        capital_text = [w for w in capital_text if w]
+        return capital_text[0]
+    
+def extract_population(soup):
+    population_row = find_value_in_table(soup, 'Population')
+    if population_row :
+        population_text = population_row .find_next('td').text.strip().split(' ')[0]
+        population_text = population_text.replace(',','')
+        
+    while population_text:
+        numeric_value_pop = extract_numeric_value(population_text)
+        if numeric_value_pop:
+            pop_val = int(numeric_value_pop)  # Convert to float if needed
+        else:
+            break
+        return pop_val
+    else:
+        return 'Data Not Found'
+    
+def extract_language(soup):
+    language_element = soup.find(string = lambda s:"Official" in str(s) and "language" in str(s))
+    if language_element:
+        language_cell = language_element.find_next('td').text.strip().split(' ')[0]
+    return language_cell
+
+def extract_area(soup):
+    area_row = find_value_in_table(soup, 'Area ')
+    if area_row :
+        area_text= area_row .find_next('td').text.strip().split(' ')[0]
+        area_text = area_text.replace(',','')    
+    while area_text:
+        numeric_value_area = extract_numeric_value(area_text)
+        if numeric_value_area:
+            area_val = int(numeric_value_area)  
+        else:
+            break
+        return area_val
+    else:
+        return 'Data Not Found'
+    
+def extract_gdp(soup):
+    gdp_link = soup.find('a', {'title': 'Gross domestic product'})
+    if gdp_link:
+        gdp_cell = gdp_link.find_parent('th', {'class': 'infobox-label'})
+        if gdp_cell:
+            gdp_row = gdp_cell.find_next('th')
+            gdp_val = gdp_row.find_next('td').text.strip().replace('\xa0', '')
+            gdp_num = float(gdp_val[1:6])
+            return gdp_num 
+    else:
+        gdp_row = soup.find('td',string ='GDP total (2019/2023 est.)').find_parent('tr')
+        south_korea_gdp =gdp_row.find_all('td')[2].text.strip().replace('\xa0','')
+        gdp_num = float(south_korea_gdp[1:6])
+        return gdp_num
+
+def extract_numeric_value(text):
+    numeric_part = ''
+    for char in text:
+        if char.isdigit() or char == '.':
+            numeric_part += char
+        else:
+            break
+    return numeric_part
+
+def find_value_in_table(soup, field_name):
+    row = soup.find('th', string = re.compile(field_name, re.I))
+    if row:
+        return row
+    else:
+        return None
+
+def parse_html_content(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    country_name = extract_country_name(soup)
+    capital_name = extract_capital_name(soup)
+    population_value = extract_population(soup)
+    language = extract_language(soup)
+    area_value = extract_area(soup)
+    gdp_value = extract_gdp(soup)
+    return country_name, capital_name, language ,population_value, area_value,gdp_value
+
+def export_to_excel(data):
+    column_names = ['Country Name', 'Capital', 'Language', 'Population', 'Area', 'GDP']
+    test_data = ['TestCountr','TestCap','TestLan',1,1,1]
+    
+    # Create a DataFrame
+    df_temp= pd.DataFrame([data], columns=column_names)
+    #print(array)
+
+    # Append the DataFrame to itself
+    df = pd.DataFrame([test_data],columns=column_names)
+    df = df._append(df_temp.copy())
+    #print(df)
+
+    # Export to Excel
+    df.to_excel('CountryData.xlsx', index=False)
+    print(f'Data exported to CountryData.xlsx')
+
+def main():
+    wikipedia_url = ['https://en.wikipedia.org/wiki/Canada', 'https://en.wikipedia.org/wiki/China','https://en.wikipedia.org/wiki/United_States','https://en.wikipedia.org/wiki/Korea','https://en.wikipedia.org/wiki/United_Kingdom','https://en.wikipedia.org/wiki/France','https://en.wikipedia.org/wiki/Turkey','https://en.wikipedia.org/wiki/Italy']
+    sample = []#
+    column_names = ['Country Name', 'Capital', 'Language', 'Population', 'Area(KM2)', 'GDP(TRILLIONS)']
+    index_names =[0,1,2,3,4,5,6,7]
+
+    try:
+        
+        for x in wikipedia_url:
+            html_content = get_html_content(x)
+            country_data = parse_html_content(html_content)
+            sample += [country_data]
+            export_to_excel(country_data)
+    
+        df = pd.DataFrame(sample,index_names,column_names)
+        df.to_excel('CountryData.xlsx', index=False)
+        largest_pop = df.loc[df['Population'].idxmax()]
+        print(largest_pop)
+        largest_area = df.loc[df['Area'].idxmax()]
+        print(largest_area)
+        largest_gdp = df.loc[df['GDP'].idxmax()]
+        print(largest_gdp)
+        print(df)
+        a = df[["Population"]].values
+        c = np.squeeze(np.asarray(a))
+        print(c)
+        b = df[["Area"]].values
+        d = np.squeeze(np.asarray(b))
+        print(d)
+        res = pearsonr(c, d)
+        print(res)
+
+
+    except Exception as e:
+        print(f'Error: {e}')
+
+if __name__ == "__main__":
+    main()
